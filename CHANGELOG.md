@@ -3,6 +3,8 @@
 - support in-memory `PEM` and `DER` certificates for TLS
 - support mTLS
 - Support unix sockets
+- Support custom connection shutdown timeout
+- Support updating active state on continue
 
 # v9.0.1
 

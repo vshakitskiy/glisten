@@ -122,6 +122,7 @@ pub type Pool(data, user_message) {
     on_init: fn(Connection(user_message)) ->
       #(data, Option(Selector(user_message))),
     on_close: Option(fn(data) -> Nil),
+    connection_shutdown_timeout_ms: Int,
     transport: Transport,
     active_state: options.ActiveState,
   )
@@ -166,6 +167,7 @@ pub fn start_pool(
         active_state: pool.active_state,
       ))
     })
+    |> factory.timeout(pool.connection_shutdown_timeout_ms)
     |> factory.named(pool.name)
     |> factory.restart_strategy(supervision.Temporary)
     |> factory.supervised,

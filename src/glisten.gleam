@@ -19,6 +19,7 @@ import glisten/socket.{
 }
 import glisten/socket/options
 import glisten/transport.{type Transport}
+import logging
 
 /// Your provided loop function will receive these message types as the
 /// second argument.
@@ -155,13 +156,17 @@ pub fn send(
 }
 
 pub opaque type Next(user_state, user_message) {
-  Continue(state: user_state, selector: Option(Selector(user_message)))
+  Continue(
+    state: user_state,
+    selector: Option(Selector(user_message)),
+    active_state: Option(options.ActiveState),
+  )
   NormalStop
   AbnormalStop(String)
 }
 
 pub fn continue(state: user_state) -> Next(user_state, user_message) {
-  Continue(state, None)
+  Continue(state, None, None)
 }
 
 pub fn with_selector(
@@ -169,8 +174,41 @@ pub fn with_selector(
   selector: Selector(user_message),
 ) -> Next(user_state, user_message) {
   case next {
-    Continue(state, _) -> Continue(state, Some(selector))
+    Continue(state, _, active_state) ->
+      Continue(state, Some(selector), active_state)
     stop -> stop
+  }
+}
+
+/// Overrides the socket's `ActiveState` starting with this message. Applied
+/// immediately when this `Next` is processed and persists as the new default 
+/// for future commands until changed again. Allowed are `Once`, `Active` and 
+/// `Count(n)` where n > 1. An invalid value is ignored.
+pub fn set_active_state(
+  next: Next(user_state, user_message),
+  active_state: options.ActiveState,
+) -> Next(user_state, user_message) {
+  case active_state {
+    options.Passive -> {
+      logging.log(
+        logging.Warning,
+        "Ignoring set_active_state: cannot set the connection's `ActiveState` to `Passive`",
+      )
+      next
+    }
+    options.Count(n) if n <= 1 -> {
+      logging.log(
+        logging.Warning,
+        "Ignoring set_active_state: Count shall be greater than 1",
+      )
+      next
+    }
+    options.Once | options.Active | options.Count(_) ->
+      case next {
+        Continue(state, selector, _) ->
+          Continue(state, selector, Some(active_state))
+        stop -> stop
+      }
   }
 }
 
@@ -187,7 +225,8 @@ pub fn convert_next(
   next: Next(state, user_message),
 ) -> handler.Next(state, user_message) {
   case next {
-    Continue(state, selector) -> handler.Continue(state, selector)
+    Continue(state, selector, active_state) ->
+      handler.Continue(state, selector, active_state)
     NormalStop -> handler.NormalStop
     AbnormalStop(reason) -> handler.AbnormalStop(reason)
   }
@@ -199,9 +238,13 @@ pub fn map_selector(
   mapper: fn(user_message) -> other_message,
 ) -> Next(state, other_message) {
   case next {
-    Continue(state, Some(selector)) ->
-      Continue(state, Some(process.map_selector(selector, mapper)))
-    Continue(state, None) -> Continue(state, None)
+    Continue(state, Some(selector), active_state) ->
+      Continue(
+        state,
+        Some(process.map_selector(selector, mapper)),
+        active_state,
+      )
+    Continue(state, None, active_state) -> Continue(state, None, active_state)
     AbnormalStop(reason) -> AbnormalStop(reason)
     NormalStop -> NormalStop
   }
@@ -231,6 +274,7 @@ pub opaque type Builder(state, user_message) {
         factory.Message(Socket, Subject(handler.Message(user_message))),
       ),
     ),
+    connection_shutdown_timeout_ms: Int,
     active_state: options.ActiveState,
   )
 }
@@ -256,13 +300,18 @@ fn convert_loop(
       handler.Custom(msg) -> User(msg)
     }
     case loop(data, message, conn) {
-      Continue(data, selector) ->
-        case selector {
+      Continue(data, selector, active_state) -> {
+        let next = case selector {
           Some(selector) ->
             handler.continue(data)
             |> handler.with_selector(map_user_selector(selector))
           _ -> handler.continue(data)
         }
+        case active_state {
+          Some(active_state) -> handler.with_active_state(next, active_state)
+          None -> next
+        }
+      }
 
       NormalStop -> handler.stop()
       AbnormalStop(reason) -> handler.stop_abnormal(reason)
@@ -306,6 +355,7 @@ pub fn new(
     client_verification: None,
     listener_name: None,
     connection_factory_name: None,
+    connection_shutdown_timeout_ms: 5000,
     active_state: options.Once,
   )
 }
@@ -426,6 +476,16 @@ pub fn with_active_state(
   }
 }
 
+/// Sets how long, in milliseconds, a connection handler is given to shut down
+/// once the supervisor asks it to before being forcefully killed. Default is 
+/// 5000.
+pub fn with_connection_shutdown_timeout_ms(
+  builder: Builder(state, user_message),
+  timeout_ms: Int,
+) -> Builder(state, user_message) {
+  Builder(..builder, connection_shutdown_timeout_ms: timeout_ms)
+}
+
 @internal
 pub fn with_listener_name(
   builder: Builder(state, user_message),
@@ -498,6 +558,7 @@ pub fn start(
     on_close: builder.on_close,
     transport:,
     active_state: builder.active_state,
+    connection_shutdown_timeout_ms: builder.connection_shutdown_timeout_ms,
   )
   |> acceptor.start_pool(transport, port, options, listener_name)
 }
@@ -550,6 +611,7 @@ pub fn start_unix(
     on_close: builder.on_close,
     transport:,
     active_state: builder.active_state,
+    connection_shutdown_timeout_ms: builder.connection_shutdown_timeout_ms,
   )
   |> acceptor.start_pool(transport, 0, options, listener_name)
 }
