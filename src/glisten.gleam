@@ -340,8 +340,7 @@ fn convert_on_init(
 ///
 /// `listener_name` and `connection_factory_name` are process names `glisten`
 /// uses internally to wire the listener and connection factory together.
-/// Create each with `process.new_name` once, at the point your program
-/// starts, and pass them in here.
+/// Create each once, at the point your program starts, and pass them in here.
 /// 
 /// `listener_name` is also what you use for `get_server_info` if you need to
 /// read back the bound port or path.
