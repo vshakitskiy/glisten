@@ -1,10 +1,13 @@
 # Unreleased
 
-- Fix internal process names being generated on every `start`/`start_unix` call 
-  instead of once in `new`, which could exhaust the atom table under supervised 
-  restarts
+- `new` now takes `listener_name` and `connection_factory_name` as its first two 
+  arguments, created once by the caller with `process.new_name`. This replaces 
+  the previous behaviour of generating these names internally on every 
+  `start` and `start_unix` call, which could exhaust the atom table under 
+  supervised restarts
 - Resolve the connection factory supervisor once per acceptor instead of on 
   every accepted connection
+- `get_server_info` now takes the listener's `Subject` rather than its `Name`
 - support in-memory `PEM` and `DER` certificates for TLS
 - support mTLS
 - Support unix sockets

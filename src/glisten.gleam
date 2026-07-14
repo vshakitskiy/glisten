@@ -52,11 +52,12 @@ pub type ServerInfo {
 }
 
 /// Returns the user-provided port or the OS-assigned value if 0 was provided.
+///
+/// Pass the subject for the `listener_name` given to `new`.
 pub fn get_server_info(
-  listener: process.Name(listener.Message),
+  listener: Subject(listener.Message),
   timeout: Int,
 ) -> ServerInfo {
-  let listener = process.named_subject(listener)
   let state = process.call(listener, timeout, listener.Info)
   case state.sock_name {
     socket.TcpSockName(ip, port) -> TcpServerInfo(port, convert_ip_address(ip))
@@ -333,26 +334,25 @@ fn convert_on_init(
   }
 }
 
-/// Create a new handler for each connection.  The required arguments mirror the
-/// `actor.start` API from `gleam_otp`.  The default pool is 10 accceptor
-/// processes.
+/// Create a new handler for each connection.  The `on_init` and `loop`
+/// arguments mirror the `actor.start` API from `gleam_otp`. The default pool
+/// is 10 acceptor processes.
 ///
-/// This function generates the process names `glisten` uses internally to
-/// wire the listener and connection factory together.
-///
-/// ## Safe use
-///
-/// Call this function once per server and reuse the resulting `Builder`.
-/// **Never call this function dynamically**, such as within a loop or within a 
-/// process within a supervision tree.
-///
-/// Each call to this function generates new Erlang atoms internally. Calling
-/// it repeatedly will result in the atom table getting filled and causing the
-/// entire virtual machine to crash.
+/// `listener_name` and `connection_factory_name` are process names `glisten`
+/// uses internally to wire the listener and connection factory together.
+/// Create each with `process.new_name` once, at the point your program
+/// starts, and pass them in here.
+/// 
+/// `listener_name` is also what you use for `get_server_info` if you need to
+/// read back the bound port or path.
 pub fn new(
-  on_init: fn(Connection(user_message)) ->
+  listener_name listener_name: process.Name(listener.Message),
+  connection_factory_name connection_factory_name: process.Name(
+    factory.Message(Socket, Subject(handler.Message(user_message))),
+  ),
+  on_init on_init: fn(Connection(user_message)) ->
     #(state, Option(Selector(user_message))),
-  loop: Loop(state, user_message),
+  loop loop: Loop(state, user_message),
 ) -> Builder(state, user_message) {
   Builder(
     interface: options.Loopback,
@@ -364,8 +364,8 @@ pub fn new(
     ipv6_support: False,
     tls_options: None,
     client_verification: None,
-    listener_name: process.new_name("glisten_listener"),
-    connection_factory_name: process.new_name("glisten_connection_supervisor"),
+    listener_name:,
+    connection_factory_name:,
     connection_shutdown_timeout_ms: 5000,
     active_state: options.Once,
   )
