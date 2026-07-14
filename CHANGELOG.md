@@ -1,5 +1,10 @@
 # Unreleased
 
+- Fix internal process names being generated on every `start`/`start_unix` call 
+  instead of once in `new`, which could exhaust the atom table under supervised 
+  restarts
+- Resolve the connection factory supervisor once per acceptor instead of on 
+  every accepted connection
 - support in-memory `PEM` and `DER` certificates for TLS
 - support mTLS
 - Support unix sockets

@@ -268,11 +268,9 @@ pub opaque type Builder(state, user_message) {
     ipv6_support: Bool,
     tls_options: Option(options.TlsCerts),
     client_verification: Option(CaCert),
-    listener_name: Option(process.Name(listener.Message)),
-    connection_factory_name: Option(
-      process.Name(
-        factory.Message(Socket, Subject(handler.Message(user_message))),
-      ),
+    listener_name: process.Name(listener.Message),
+    connection_factory_name: process.Name(
+      factory.Message(Socket, Subject(handler.Message(user_message))),
     ),
     connection_shutdown_timeout_ms: Int,
     active_state: options.ActiveState,
@@ -338,6 +336,19 @@ fn convert_on_init(
 /// Create a new handler for each connection.  The required arguments mirror the
 /// `actor.start` API from `gleam_otp`.  The default pool is 10 accceptor
 /// processes.
+///
+/// This function generates the process names `glisten` uses internally to
+/// wire the listener and connection factory together.
+///
+/// ## Safe use
+///
+/// Call this function once per server and reuse the resulting `Builder`.
+/// **Never call this function dynamically**, such as within a loop or within a 
+/// process within a supervision tree.
+///
+/// Each call to this function generates new Erlang atoms internally. Calling
+/// it repeatedly will result in the atom table getting filled and causing the
+/// entire virtual machine to crash.
 pub fn new(
   on_init: fn(Connection(user_message)) ->
     #(state, Option(Selector(user_message))),
@@ -353,8 +364,8 @@ pub fn new(
     ipv6_support: False,
     tls_options: None,
     client_verification: None,
-    listener_name: None,
-    connection_factory_name: None,
+    listener_name: process.new_name("glisten_listener"),
+    connection_factory_name: process.new_name("glisten_connection_supervisor"),
     connection_shutdown_timeout_ms: 5000,
     active_state: options.Once,
   )
@@ -491,7 +502,7 @@ pub fn with_listener_name(
   builder: Builder(state, user_message),
   listener_name: process.Name(listener.Message),
 ) -> Builder(state, user_message) {
-  Builder(..builder, listener_name: Some(listener_name))
+  Builder(..builder, listener_name:)
 }
 
 @internal
@@ -501,7 +512,7 @@ pub fn with_connection_factory_name(
     factory.Message(socket.Socket, Subject(handler.Message(user_message))),
   ),
 ) -> Builder(state, user_message) {
-  Builder(..builder, connection_factory_name: Some(connection_factory_name))
+  Builder(..builder, connection_factory_name:)
 }
 
 /// Start the TCP server with the given handler on the provided port
@@ -509,13 +520,8 @@ pub fn start(
   builder: Builder(state, user_message),
   port: Int,
 ) -> Result(actor.Started(supervisor.Supervisor), actor.StartError) {
-  let listener_name =
-    option.unwrap(builder.listener_name, process.new_name("glisten_listener"))
-  let connection_supervisor =
-    option.unwrap(
-      builder.connection_factory_name,
-      process.new_name("glisten_connection_supervisor"),
-    )
+  let listener_name = builder.listener_name
+  let connection_supervisor = builder.connection_factory_name
   let options =
     [options.Ip(builder.interface)]
     |> list.append(case builder.ipv6_support {
@@ -578,13 +584,8 @@ pub fn start_unix(
     }
   }
 
-  let listener_name =
-    option.unwrap(builder.listener_name, process.new_name("glisten_listener"))
-  let connection_supervisor =
-    option.unwrap(
-      builder.connection_factory_name,
-      process.new_name("glisten_connection_supervisor"),
-    )
+  let listener_name = builder.listener_name
+  let connection_supervisor = builder.connection_factory_name
 
   let options =
     [options.Ip(options.UnixPath(path))]
