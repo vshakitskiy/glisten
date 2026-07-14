@@ -6,7 +6,7 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import glisten/socket.{type Socket, type SocketReason}
-import glisten/socket/options.{type ActiveState, type IpAddress}
+import glisten/socket/options.{type ActiveState}
 import glisten/transport.{type Transport}
 import logging
 
@@ -35,7 +35,7 @@ pub type LoopMessage(user_message) {
 }
 
 pub type ClientIp =
-  Result(#(IpAddress, Int), Nil)
+  Result(socket.SockName, Nil)
 
 pub type LoopState(state, user_message) {
   LoopState(

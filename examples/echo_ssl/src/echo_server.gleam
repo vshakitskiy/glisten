@@ -19,13 +19,14 @@ pub fn main() {
       connection_factory_name,
       fn(_conn) { #(Nil, None) },
       fn(state, msg, conn) {
-        let assert Ok(info) = glisten.get_connection_info(conn)
+        let assert Ok(glisten.TcpSocketAddress(port:, ip_address:)) =
+          glisten.get_connection_info(conn)
         logging.log(
           logging.Info,
           "Client connected at "
-            <> glisten.ip_address_to_string(info.ip_address)
+            <> glisten.ip_address_to_string(ip_address)
             <> " at port "
-            <> int.to_string(info.port),
+            <> int.to_string(port),
         )
         let assert Packet(msg) = msg
         let assert Ok(_) = glisten.send(conn, bytes_tree.from_bit_array(msg))
@@ -35,7 +36,7 @@ pub fn main() {
     |> glisten.with_tls(certfile: "localhost.crt", keyfile: "localhost.key")
     |> glisten.start(0)
 
-  let assert glisten.TcpServerInfo(port, ip_address) =
+  let assert glisten.TcpSocketAddress(port, ip_address) =
     glisten.get_server_info(process.named_subject(listener_name), 5000)
 
   io.println(

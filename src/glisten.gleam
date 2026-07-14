@@ -42,13 +42,20 @@ pub type Socket =
 pub type SocketReason =
   InternalSocketReason
 
-pub type ConnectionInfo {
-  ConnectionInfo(port: Int, ip_address: IpAddress)
+/// The address a socket is bound to, or the address of a connected peer.
+/// Unix sockets have no port/IP, only the bound path.
+pub type SocketAddress {
+  TcpSocketAddress(port: Int, ip_address: IpAddress)
+  UnixSocketAddress(path: String)
 }
 
-pub type ServerInfo {
-  TcpServerInfo(port: Int, ip_address: IpAddress)
-  UnixServerInfo(path: String)
+@internal
+pub fn convert_sock_name(sock_name: socket.SockName) -> SocketAddress {
+  case sock_name {
+    socket.TcpSockName(ip, port) ->
+      TcpSocketAddress(port, convert_ip_address(ip))
+    socket.UnixSockName(path) -> UnixSocketAddress(path)
+  }
 }
 
 /// Returns the user-provided port or the OS-assigned value if 0 was provided.
@@ -57,12 +64,9 @@ pub type ServerInfo {
 pub fn get_server_info(
   listener: Subject(listener.Message),
   timeout: Int,
-) -> ServerInfo {
+) -> SocketAddress {
   let state = process.call(listener, timeout, listener.Info)
-  case state.sock_name {
-    socket.TcpSockName(ip, port) -> TcpServerInfo(port, convert_ip_address(ip))
-    socket.UnixSockName(path) -> UnixServerInfo(path)
-  }
+  convert_sock_name(state.sock_name)
 }
 
 /// This type holds useful bits of data for the active connection.
@@ -138,14 +142,15 @@ fn ipv6_zeros(
   }
 }
 
-/// Tries to read the IP address and port of a connected client.  It will
-/// return valid IPv4 or IPv6 addresses, attempting to return the most relevant
-/// one for the client.
+/// Tries to read the address of a connected client. For TCP/TLS connections
+/// this is the IPv4 or IPv6 address and port, attempting to return the most
+/// relevant one for the client. For unix socket connections this is the
+/// bound path, since unix sockets have no per-client address.
 pub fn get_connection_info(
   conn: Connection(user_message),
-) -> Result(ConnectionInfo, Nil) {
+) -> Result(SocketAddress, Nil) {
   transport.peername(conn.transport, conn.socket)
-  |> result.map(fn(pair) { ConnectionInfo(pair.1, convert_ip_address(pair.0)) })
+  |> result.map(convert_sock_name)
 }
 
 /// Sends a BytesTree message over the socket using the active transport

@@ -28,7 +28,7 @@ pub fn main() {
     |> glisten.with_ipv6
     |> glisten.start_unix("/tmp/test.sock")
 
-  let assert glisten.UnixServerInfo(path:) =
+  let assert glisten.UnixSocketAddress(path:) =
     glisten.get_server_info(process.named_subject(listener_name), 5000)
 
   io.println("Listening on " <> path)
