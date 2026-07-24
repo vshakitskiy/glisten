@@ -7,6 +7,7 @@
   supervised restarts
 - Resolve the connection factory supervisor once per acceptor instead of on 
   every accepted connection
+- Fix connection handler not applying user's selector on continue.
 - `get_server_info` now takes the listener's `Subject` rather than its `Name`
 - Replace `ServerInfo` and `ConnectionInfo` with a single `SocketAddress` type
 - support in-memory `PEM` and `DER` certificates for TLS

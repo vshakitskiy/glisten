@@ -107,7 +107,7 @@ fn apply_next(
   packet_consumed: Bool,
 ) -> actor.Next(LoopState(state, user_message), Message(user_message)) {
   case res {
-    Ok(Continue(next_state, _selector, Some(new_active_state))) ->
+    Ok(Continue(next_state, selector, Some(new_active_state))) ->
       case
         transport.set_opts(state.transport, state.socket, [
           options.ActiveMode(new_active_state),
@@ -121,9 +121,10 @@ fn apply_next(
               active_state: new_active_state,
             ),
           )
+          |> apply_selector(state.sender, selector)
         Error(_) -> actor.stop()
       }
-    Ok(Continue(next_state, _selector, None))
+    Ok(Continue(next_state, selector, None))
       if packet_consumed && state.active_state == options.Once
     ->
       case
@@ -131,11 +132,14 @@ fn apply_next(
           options.ActiveMode(options.Once),
         ])
       {
-        Ok(Nil) -> actor.continue(LoopState(..state, state: next_state))
+        Ok(Nil) ->
+          actor.continue(LoopState(..state, state: next_state))
+          |> apply_selector(state.sender, selector)
         Error(_) -> actor.stop()
       }
-    Ok(Continue(next_state, _selector, None)) ->
+    Ok(Continue(next_state, selector, None)) ->
       actor.continue(LoopState(..state, state: next_state))
+      |> apply_selector(state.sender, selector)
     Ok(NormalStop) -> actor.stop()
     Ok(AbnormalStop(reason)) -> actor.stop_abnormal(reason)
     Error(reason) -> {
@@ -146,6 +150,57 @@ fn apply_next(
       actor.continue(state)
     }
   }
+}
+
+// Applies a selector returned from `Continue`.
+fn apply_selector(
+  next: actor.Next(LoopState(state, user_message), Message(user_message)),
+  sender: Subject(Message(user_message)),
+  selector: Option(Selector(LoopMessage(user_message))),
+) -> actor.Next(LoopState(state, user_message), Message(user_message)) {
+  case selector {
+    None -> next
+    Some(selector) -> {
+      let mapped =
+        process.map_selector(selector, fn(loop_message) {
+          case loop_message {
+            Custom(message) -> User(message)
+            Packet(bits) -> Internal(ReceiveMessage(bits))
+          }
+        })
+
+      actor.with_selector(
+        next,
+        internal_selector(sender) |> process.merge_selector(mapped),
+      )
+    }
+  }
+}
+
+// The intenral selector that contains socket events mapped to `Internal` plus 
+// the connection's own subject.
+fn internal_selector(
+  sender: Subject(Message(user_message)),
+) -> Selector(Message(user_message)) {
+  process.new_selector()
+  |> process.select_record(atom.create("tcp"), 2, fn(record) {
+    ReceiveMessage(socket_data(record))
+  })
+  |> process.select_record(atom.create("ssl"), 2, fn(record) {
+    ReceiveMessage(socket_data(record))
+  })
+  |> process.select_record(atom.create("ssl_closed"), 1, fn(_nil) { Closed })
+  |> process.select_record(atom.create("tcp_closed"), 1, fn(_nil) { Closed })
+  |> process.select_record(atom.create("ssl_passive"), 1, fn(_nil) { Passive })
+  |> process.select_record(atom.create("tcp_passive"), 1, fn(_nil) { Passive })
+  |> process.select_record(atom.create("tcp_error"), 2, fn(record) {
+    SocketError(socket_error(record))
+  })
+  |> process.select_record(atom.create("ssl_error"), 2, fn(record) {
+    SocketError(socket_error(record))
+  })
+  |> process.map_selector(Internal)
+  |> process.merge_selector(process.new_selector() |> process.select(sender))
 }
 
 pub type Loop(state, user_message) =
